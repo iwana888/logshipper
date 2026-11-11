@@ -1,0 +1,15 @@
+* text=auto
+
+# Keep shell/Python/Pascal sources at LF (needed on Linux/macOS).
+*.sh      text eol=lf
+*.py      text eol=lf
+*.pas     text eol=lf
+*.lpr     text eol=lf
+*.lpi     text eol=lf
+*.ini     text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.service text eol=lf
+
+# Windows PowerShell scripts use CRLF.
+*.ps1     text eol=crlf

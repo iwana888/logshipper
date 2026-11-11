@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loki Log Viewer</title>
+<style>
+  :root{
+    --bg:#0b1020; --bg2:#0f162b; --card:#151d33; --card2:#1b2540;
+    --line:#28324e; --line2:#354263; --txt:#e6edf8; --muted:#8ea0c2;
+    --accent:#4cc9f0; --accent2:#4361ee; --ok:#2ec4a6; --err:#ff5d6c;
+    --warn:#ffb454; --info:#5aa9ff; --debug:#9aa7c2;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Code",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 15% -10%,#182549 0%,transparent 60%),var(--bg);
+       color:var(--txt);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;min-height:100vh}
+  .wrap{max-width:1560px;margin:0 auto;padding:20px 24px 48px}
+  header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+        display:grid;place-items:center;font-weight:800;font-size:19px;color:#04122a;box-shadow:0 6px 22px #4361ee55}
+  h1{font-size:19px;margin:0;letter-spacing:.2px;font-weight:650}
+  .sub{color:var(--muted);font-size:12px;margin-top:1px}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);
+        padding:7px 12px;border-radius:999px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 3px #8ea0c222}
+  .dot.ok{background:var(--ok);box-shadow:0 0 0 3px #2ec4a633}.dot.bad{background:var(--err);box-shadow:0 0 0 3px #ff5d6c33}
+  .card{background:linear-gradient(180deg,var(--card) 0%,var(--bg2) 100%);border:1px solid var(--line);
+        border-radius:14px;box-shadow:0 10px 30px #0004}
+  .toolbar{padding:16px 18px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+  .fld{display:flex;flex-direction:column;gap:5px;min-width:0}
+  .fld label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:600}
+  select,input[type=text],input[type=number],input[type=datetime-local]{
+    background:#0c1428;color:var(--txt);border:1px solid var(--line2);border-radius:8px;
+    padding:8px 10px;font-size:13px;outline:none;min-height:36px;font-family:inherit}
+  select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #4cc9f022}
+  input[type=text]{min-width:210px}
+  .grow{flex:1;min-width:180px}
+  .grow input{width:100%}
+  button{cursor:pointer;border:1px solid var(--line2);background:var(--card2);color:var(--txt);
+         padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;min-height:36px;transition:.15s;font-family:inherit}
+  button:hover{border-color:var(--accent);transform:translateY(-1px)}
+  button.primary{background:linear-gradient(135deg,var(--accent),#3a86ff);color:#04122a;border:none;
+                 box-shadow:0 4px 16px #4361ee44}
+  button.primary:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .qline{display:flex;gap:10px;align-items:center;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+  .qline .tag{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.8px;white-space:nowrap}
+  #logql{flex:1;font-family:var(--mono);font-size:12.5px;color:#a5e8ff;background:#08101f;
+         border:1px solid #243a55;min-width:0}
+  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
+          background:#0c1428;border:1px solid var(--line2);padding:8px 11px;border-radius:8px;min-height:36px;cursor:pointer;white-space:nowrap}
+  .switch input{accent-color:var(--accent);margin:0}
+  .stats{display:flex;gap:22px;flex-wrap:wrap;padding:11px 18px;margin-bottom:12px;font-size:12px;color:var(--muted)}
+  .stats b{color:var(--txt);font-weight:650;font-variant-numeric:tabular-nums}
+  .stats .k{color:var(--accent);font-weight:700}
+  .panel{overflow:hidden}
+  .thead{display:grid;grid-template-columns:172px 78px 168px minmax(0,1fr);gap:0;background:#101a30;
+         border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);font-weight:700;
+         letter-spacing:.7px;text-transform:uppercase;position:sticky;top:0;z-index:2}
+  .thead>div{padding:10px 12px;border-right:1px solid #ffffff08}
+  #rows{max-height:min(62vh,720px);overflow:auto}
+  .line{display:grid;grid-template-columns:172px 78px 168px minmax(0,1fr);border-bottom:1px solid #ffffff08;
+        font-family:var(--mono);font-size:12.5px;align-items:start}
+  .line:hover{background:#1a2540aa}
+  .line>div{padding:7px 12px;border-right:1px solid #ffffff06;overflow-wrap:anywhere;white-space:pre-wrap}
+  .ts{color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .lvl{font-weight:700;font-size:10.5px;text-align:center;letter-spacing:.5px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:5px;border:1px solid}
+  .b-ERROR{color:#ff98a2;background:#ff5d6c1c;border-color:#ff5d6c55}
+  .b-WARN{color:#ffd49a;background:#ffb45418;border-color:#ffb45455}
+  .b-INFO{color:#9fd0ff;background:#5aa9ff16;border-color:#5aa9ff44}
+  .b-DEBUG{color:#b9c4da;background:#9aa7c216;border-color:#9aa7c244}
+  .b-OTHER{color:var(--muted);background:#ffffff08;border-color:#ffffff18}
+  .labels{color:#82b7e8;font-size:11px;white-space:normal;word-break:break-all}
+  .labels span{display:inline-block;background:#1b2c4a;border:1px solid #2c4670;border-radius:4px;
+               padding:0 5px;margin:1px 3px 1px 0}
+  .msg{color:#dbe6f7;white-space:pre-wrap}
+  mark{background:#ffb454;color:#1a1205;border-radius:2px;padding:0 1px}
+  .state{padding:52px 20px;text-align:center;color:var(--muted)}
+  .state .big{font-size:34px;margin-bottom:10px;opacity:.55}
+  .errbox{margin:12px 18px;padding:12px 14px;border:1px solid #ff5d6c55;background:#ff5d6c12;
+          border-radius:9px;color:#ffb3bb;font-family:var(--mono);font-size:12px;display:none;white-space:pre-wrap}
+  details{margin-top:12px;color:var(--muted);font-size:12px}
+  summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none}
+  .help{margin-top:10px;background:#08101f;border:1px solid var(--line);border-radius:9px;padding:12px 14px;
+        font-family:var(--mono);font-size:12px;line-height:1.9;color:#b9c9e2;overflow-x:auto}
+  .help code{color:#a5e8ff;background:#182a45;padding:1px 5px;border-radius:4px}
+  .foot{margin-top:14px;color:var(--muted);font-size:11.5px;text-align:center}
+  .spin{display:inline-block;width:12px;height:12px;border:2px solid #ffffff33;border-top-color:var(--accent);
+        border-radius:50%;animation:r .7s linear infinite;vertical-align:-2px;margin-right:7px}
+  @keyframes r{to{transform:rotate(360deg)}}
+  @media(max-width:980px){
+    .thead,.line{grid-template-columns:140px 66px minmax(0,1fr)}
+    .thead>div:nth-child(3),.line>div:nth-child(3){display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">L</div>
+      <div><h1>Loki Log Viewer</h1><div class="sub">按你的 logshipper 配置查询 · job / instance / 关键字 / 时间</div></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill"><span id="dot" class="dot"></span><span id="conn">检测中…</span></div>
+    <div class="pill" id="lokiPill">Loki: —</div>
+    <button id="btnSet" title="API 基址设置">⚙</button>
+  </header>
+
+  <div class="card toolbar">
+    <div class="row">
+      <div class="fld"><label>Job</label><select id="job" style="min-width:150px"><option value="">加载中…</option></select></div>
+      <div class="fld"><label>Instance</label><select id="instance" style="min-width:170px"><option value="">全部</option></select></div>
+      <div class="fld"><label>级别（按行内容）</label>
+        <select id="level" style="min-width:130px">
+          <option value="">全部</option><option value="error|fatal|critical">ERROR / FATAL</option>
+          <option value="warn|warning">WARN</option><option value="info">INFO</option>
+          <option value="debug|trace">DEBUG / TRACE</option>
+        </select>
+      </div>
+      <div class="fld"><label>时间范围</label>
+        <select id="range" style="min-width:130px">
+          <option value="900">最近 15 分钟</option><option value="3600" selected>最近 1 小时</option>
+          <option value="21600">最近 6 小时</option><option value="86400">最近 24 小时</option>
+          <option value="604800">最近 7 天</option><option value="custom">自定义…</option>
+        </select>
+      </div>
+      <div class="fld" id="customRange" style="display:none"><label>起 / 止（本地）</label>
+        <div style="display:flex;gap:6px"><input type="datetime-local" id="tFrom"><input type="datetime-local" id="tTo"></div>
+      </div>
+      <div class="fld grow"><label>关键字</label><input type="text" id="kw" placeholder="如 HealthCheck / network delay，留空查全部"></div>
+      <div class="fld"><label>匹配</label>
+        <select id="kwmode"><option value="inc">包含 |=</option><option value="exc">排除 !=</option><option value="re">正则 |~</option></select>
+      </div>
+      <div class="fld"><label>条数</label><select id="limit"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select></div>
+      <button class="primary" id="btnQuery">查询</button>
+      <label class="switch"><input type="checkbox" id="auto"> 自动 10s</label>
+    </div>
+
+    <div class="qline">
+      <span class="tag">LogQL</span>
+      <input type="text" id="logql" spellcheck="false" placeholder="{job=&quot;myapp&quot;}">
+      <button id="btnCopy" title="复制 LogQL">复制</button>
+      <button id="btnCsv" title="导出当前结果为 CSV">导出</button>
+    </div>
+
+    <details>
+      <summary>查询语法速查 / 命令行用法</summary>
+      <div class="help">
+浏览器里填好条件会自动生成 LogQL，也可以直接改上面那一行。
+<br><code>{job="myapp"}</code>　按 job 查（你 ini 里的 <b>[agent].job</b>）
+<br><code>{job="myapp",instance="app-1"}</code>　限定某台机器（<b>[agent].instance</b>）
+<br><code>{job="myapp"} |= "HealthCheck"</code>　包含关键字；<code>!= "xxx"</code> 排除；<code>|~ "(?i)error"</code> 正则
+<br><code>{job="myapp"} | json | detected_level="error"</code>　用 Loki 自动识别的级别（需结构化元数据）
+<br><br>
+命令行（无需本页，直接在 Loki 服务端或任意能访问 3100 的机器）：
+<br><code>curl -G 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={job="myapp"}' --data-urlencode "start=$(( $(date +%s) -3600 ))000000000" --data-urlencode "end=$(date +%s)000000000" --data-urlencode 'limit=100'</code>
+<br><code>curl -s 'http://localhost:3100/loki/api/v1/label/job/values'</code>　列所有 job
+<br><code>curl -s -G 'http://localhost:3100/loki/api/v1/series' --data-urlencode 'match[]={job="myapp"}'</code>　列所有标签组合
+<br><br>
+也可以在 <b>Grafana → Explore → 选 Loki 数据源</b>，把 LogQL 粘进去即可。
+      </div>
+    </details>
+  </div>
+
+  <div class="card stats" id="stats">
+    <span>返回 <b id="sCount">—</b> 行</span>
+    <span>流 <b id="sStreams">—</b> 个</span>
+    <span>扫描 <b id="sScan">—</b> 行</span>
+    <span>耗时 <b id="sTime">—</b></span>
+    <span class="spacer"></span>
+    <span id="sWhen" class="k">—</span>
+  </div>
+
+  <div class="card panel">
+    <div class="thead"><div>时间（本地）</div><div>级别</div><div>标签</div><div>内容</div></div>
+    <div class="errbox" id="errbox"></div>
+    <div id="rows"><div class="state"><div class="big">⌕</div>设置条件后点「查询」</div></div>
+  </div>
+
+  <div class="foot" id="foot">页面与 Loki API 同源代理 · 纯标准库 · 无需联网 CDN</div>
+</div>
+
+<script>
+"use strict";
+let API = "";              // "" = same origin (recommended, via web/serve.py)
+let lastRows = [];
+let timer = null;
+let seq = 0;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function apiBase(){
+  return API.replace(/\/$/, "");
+}
+function url(path, params){
+  const u = new URL(apiBase() + path, location.href);
+  Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v); });
+  return u.toString();
+}
+async function getJSON(path, params){
+  const r = await fetch(url(path, params), {headers:{"Accept":"application/json"}});
+  const txt = await r.text();
+  let j; try { j = JSON.parse(txt); } catch { throw new Error("HTTP " + r.status + " (非 JSON): " + txt.slice(0,200)); }
+  if (!r.ok) throw new Error("HTTP " + r.status + ": " + (j.error || txt.slice(0,200)));
+  return j;
+}
+
+async function checkConn(){
+  try{
+    const info = await getJSON("/api/info", {});
+    $("lokiPill").textContent = "Loki: " + (info.loki || "same-origin proxy");
+  }catch{ /* file:// mode: no /api/info */ }
+  try{
+    await getJSON("/loki/api/v1/label/job/values", {});
+    $("dot").className = "dot ok"; $("conn").textContent = "已连接";
+  }catch(e){
+    $("dot").className = "dot bad"; $("conn").textContent = "连接失败";
+    showErr("连不上 Loki：" + e.message + "\n\n如果用 file:// 直接打开了本页，请改用：\n  python web/serve.py\n然后访问 http://127.0.0.1:8099\n\n或点右上角 ⚙ 填写代理地址。");
+  }
+}
+
+async function loadLabels(){
+  try{
+    const jobs = await getJSON("/loki/api/v1/label/job/values", {});
+    const vals = jobs.data || [];
+    $("job").innerHTML = vals.length
+      ? vals.map(v => `<option value="${esc(v)}"${v === "myapp" ? " selected" : ""}>${esc(v)}</option>`).join("")
+      : `<option value="">(无 job)</option>`;
+  }catch(e){ $("job").innerHTML = `<option value="">(加载失败)</option>`; }
+
+  try{
+    const ins = await getJSON("/loki/api/v1/label/instance/values", {});
+    const vals = ins.data || [];
+    $("instance").innerHTML = `<option value="">全部</option>` + vals.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  }catch{ /* optional */ }
+  buildQuery();
+}
+
+function buildQuery(){
+  const parts = [];
+  const job = $("job").value.trim();
+  const inst = $("instance").value.trim();
+  if (job) parts.push(`job="${job}"`);
+  if (inst) parts.push(`instance="${inst}"`);
+  let q = "{" + parts.join(",") + "}";
+  if (!job && !inst) q = '{job=~".+"}';
+
+  const lvl = $("level").value;
+  if (lvl) q += ` |~ ` + JSON.stringify("(?i)(" + lvl + ")");
+
+  const kw = $("kw").value.trim();
+  if (kw){
+    const mode = $("kwmode").value;
+    if (mode === "inc") q += ` |= ${JSON.stringify(kw)}`;
+    else if (mode === "exc") q += ` != ${JSON.stringify(kw)}`;
+    else q += ` |~ ${JSON.stringify(kw)}`;
+  }
+  $("logql").value = q;
+  return q;
+}
+
+function windowNs(){
+  const mode = $("range").value;
+  let endMs = Date.now(), startMs;
+  if (mode === "custom"){
+    const f = $("tFrom").value, t = $("tTo").value;
+    if (!f || !t) throw new Error("自定义范围需要填写起止时间");
+    startMs = new Date(f).getTime(); endMs = new Date(t).getTime();
+    if (!(startMs < endMs)) throw new Error("起始时间必须早于结束时间");
+  } else {
+    startMs = endMs - Number(mode) * 1000;
+  }
+  // nanoseconds via BigInt (19 digits exceed Number.MAX_SAFE_INTEGER)
+  return { start: (BigInt(startMs) * 1000000n).toString(), end: (BigInt(endMs) * 1000000n).toString() };
+}
+
+function showErr(msg){ const b = $("errbox"); b.textContent = msg; b.style.display = msg ? "block" : "none"; }
+
+function nsToDate(ns){
+  let ms;
+  try { ms = Number(BigInt(ns) / 1000000n); } catch { ms = Date.now(); }
+  return new Date(ms);
+}
+function fmtTime(d){
+  const p = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,"0")}`;
+}
+function detectLevel(text){
+  if (/\b(ERROR|FATAL|CRITICAL)\b/i.test(text)) return "ERROR";
+  if (/\b(WARN|WARNING)\b/i.test(text)) return "WARN";
+  if (/\bDEBUG|TRACE\b/i.test(text)) return "DEBUG";
+  if (/\bINFO\b/i.test(text)) return "INFO";
+  return "OTHER";
+}
+function highlight(text){
+  const kw = $("kw").value.trim();
+  let out = esc(text);
+  if (kw && $("kwmode").value === "inc"){
+    try{
+      const re = new RegExp("(" + kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + ")", "gi");
+      out = out.replace(re, "<mark>$1</mark>");
+    }catch{}
+  }
+  return out;
+}
+
+async function query(){
+  const my = ++seq;
+  showErr("");
+  const btn = $("btnQuery"); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>查询中';
+  try{
+    const {start, end} = windowNs();
+    const q = $("logql").value.trim() || buildQuery();
+    const j = await getJSON("/loki/api/v1/query_range", {
+      query: q, start, end, limit: $("limit").value, direction: "backward"
+    });
+    if (my !== seq) return;
+
+    const streams = (j.data && j.data.result) || [];
+    const rows = [];
+    for (const s of streams){
+      const st = s.stream || {};
+      const labelHtml = Object.entries(st)
+        .filter(([k]) => !["detected_level","service_name"].includes(k))
+        .map(([k,v]) => `<span>${esc(k)}=${esc(v)}</span>`).join("") || '<span>—</span>';
+      for (const v of (s.values || [])){
+        rows.push({ ns: String(v[0]), text: String(v[1]), labels: labelHtml, st });
+      }
+    }
+    // backward from Loki, but sort newest-first defensively
+    rows.sort((a,b) => (BigInt(a.ns) > BigInt(b.ns) ? -1 : BigInt(a.ns) < BigInt(b.ns) ? 1 : 0));
+    lastRows = rows;
+    render(rows);
+
+    const sum = (j.data && j.data.stats && j.data.stats.summary) || {};
+    $("sCount").textContent = rows.length;
+    $("sStreams").textContent = streams.length;
+    $("sScan").textContent = (sum.totalLinesProcessed ?? "—").toLocaleString();
+    $("sTime").textContent = sum.execTime != null ? (sum.execTime * 1000).toFixed(0) + " ms" : "—";
+    $("sWhen").textContent = "更新于 " + fmtTime(new Date());
+    $("foot").textContent = "LogQL: " + q;
+  }catch(e){
+    if (my === seq) { showErr(String(e.message || e)); $("rows").innerHTML = '<div class="state"><div class="big">!</div>查询失败，见上方错误</div>'; }
+  }finally{
+    if (my === seq){ btn.disabled = false; btn.textContent = "查询"; }
+  }
+}
+
+function render(rows){
+  if (!rows.length){
+    $("rows").innerHTML = '<div class="state"><div class="big">∅</div>这个时间范围内没有匹配的日志<br><span style="font-size:12px">试试放宽时间范围，或清空关键字</span></div>';
+    return;
+  }
+  $("rows").innerHTML = rows.map(r => {
+    const lv = detectLevel(r.text);
+    return `<div class="line">
+      <div class="ts">${fmtTime(nsToDate(r.ns))}</div>
+      <div class="lvl"><span class="badge b-${lv}">${lv}</span></div>
+      <div class="labels">${r.labels}</div>
+      <div class="msg">${highlight(r.text)}</div>
+    </div>`;
+  }).join("");
+}
+
+function exportCsv(){
+  if (!lastRows.length){ alert("没有可导出的结果"); return; }
+  const cell = s => '"' + String(s).replace(/"/g,'""') + '"';
+  const csv = ["time,level,message"].concat(lastRows.map(r =>
+    [fmtTime(nsToDate(r.ns)), detectLevel(r.text), cell(r.text)].join(","))).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], {type:"text/csv;charset=utf-8"}));
+  a.download = "loki_logs_" + Date.now() + ".csv"; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// --- wiring ---
+["job","instance","level","kw","kwmode","range"].forEach(id =>
+  $(id).addEventListener("change", () => { buildQuery(); if (id === "range") $("customRange").style.display = $("range").value === "custom" ? "flex" : "none"; }));
+$("kw").addEventListener("input", buildQuery);
+$("kw").addEventListener("keydown", e => { if (e.key === "Enter") query(); });
+$("logql").addEventListener("keydown", e => { if (e.key === "Enter") query(); });
+$("btnQuery").addEventListener("click", query);
+$("btnCopy").addEventListener("click", async () => {
+  try{ await navigator.clipboard.writeText($("logql").value); $("btnCopy").textContent = "已复制"; setTimeout(()=>$("btnCopy").textContent="复制",1200); }
+  catch{ $("logql").select(); document.execCommand("copy"); }
+});
+$("btnCsv").addEventListener("click", exportCsv);
+$("auto").addEventListener("change", e => {
+  clearInterval(timer);
+  if (e.target.checked){ timer = setInterval(query, 10000); query(); }
+});
+$("btnSet").addEventListener("click", () => {
+  const v = prompt("Loki/代理 API 基址（留空 = 同源，推荐）\n直接双击本页时用 http://127.0.0.1:8099", API);
+  if (v !== null){ API = v.trim(); checkConn(); loadLabels(); }
+});
+if (location.protocol === "file:"){
+  API = "http://127.0.0.1:8099";
+  $("foot").textContent = "file:// 模式：默认连 http://127.0.0.1:8099，可用右上角 ⚙ 修改";
+}
+checkConn().then(loadLabels).then(query);
+</script>
+</body>
+</html>

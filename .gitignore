@@ -1,0 +1,26 @@
+# --- Build artifacts (FPC / Lazarus) ---
+*.exe
+*.o
+*.ppu
+*.compiled
+lib/
+
+# --- Lazarus IDE session (machine-specific paths, may reference other projects) ---
+*.lps
+backup/
+
+# --- Local config with real endpoints (keep your own; see logshipper.example.ini) ---
+logshipper.ini
+logshipper_real.ini
+
+# --- Runtime state / logs (regenerated locally) ---
+logshipper.log
+positions.json
+test/logs/
+
+# --- Captured diagnostics (may contain internal hostnames) ---
+win_diag_err.txt
+win_diag_out.txt
+
+# --- Agent / editor data — never commit ---
+.codebuddy/
