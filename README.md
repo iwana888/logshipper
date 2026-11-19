@@ -126,6 +126,24 @@ instances=app-01;app-02;app-03
 - Streams are keyed by `(job, instance, level)`, so lines from different app
   instances never share a stream or a monotonic timestamp clock.
 
+### Log rotation & file sharing (Windows)
+
+On Windows, log files are opened with `FILE_SHARE_READ | FILE_SHARE_WRITE |
+FILE_SHARE_DELETE`. The `DELETE` share is **required** so a third-party rotator
+(`logrotate`, `copytruncate`, or any tool that renames/removes the live log) can
+do its job while `logshipper` is tailing the file. Without it, Windows shows
+*"The action can't be completed because the file is open in logshipper.exe"* and
+rotation fails. This is deliberately set via `CreateFile()` rather than FPC's
+`fmShareDenyNone`, which on FPC 3.2.2/Windows maps to only `READ|WRITE` (no
+`DELETE`). On Unix no explicit share mode is needed.
+
+`logshipper` never writes to the log files it reads. Rotation is detected by
+`stat` (inode change → `rename+new`, size < offset → `copytruncate`): it drains
+the remaining bytes from the old handle, then reopens the new file from offset 0.
+If the file was already rotated while the process was down, the recorded inode
+no longer matches and reading restarts from 0. Keep `paths` matched to live,
+uncompressed logs (`*.log`) so rotated `.gz` archives are never picked up.
+
 ### Built-in web viewer
 
 The binary can serve the log query page and proxy Loki API calls itself, so you
@@ -139,10 +157,15 @@ listen=127.0.0.1:8099
 - One background thread hosts the page and forwards `/loki/*` to the Loki URL
   already configured for pushing (`[loki].url`). It is same-origin, so the
   browser never calls Loki directly (Loki sends no CORS headers).
-- Routes: `/` (the viewer page), `/api/info` (returns `{"loki": ...}`),
+- Routes: `/` (the viewer page), `/api/info` (returns `{"loki": ..., "index": ...}`),
   `/loki/<path>` (reverse-proxied to `<loki-url>/<path>`).
 - The page is read from `web/index.html` next to the executable; if that file
-  is missing, a minimal built-in page is served instead.
+  is missing, a minimal built-in page is served instead. **Ship the whole `web`
+  folder with the binary** (keep `web/index.html` beside `logshipper.exe`) to get
+  the full UI — copying only the `.exe` gives the minimal page. The lookup also
+  checks the working directory and logs the chosen file at startup; `/api/info`'s
+  `index` field shows the loaded path (empty string = built-in fallback), which
+  makes a missing page easy to diagnose.
 - Default bind is `127.0.0.1` (localhost only). Change to e.g. `0.0.0.0:8099`
   to expose it on the network. Leave `listen` empty to disable the server.
 - No authentication is added — keep it behind localhost or a reverse proxy with
