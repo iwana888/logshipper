@@ -21,17 +21,17 @@ type
     Path: string;
     Inode: QWord;
     Offset: Int64;
-    f: TFileStream;
+    f: TStream;   { TFileStream on Unix; TSharedHandleStream on Windows }
     Opened: Boolean;
     Leftover: string;
     LastOpenWarn: QWord;
     constructor Create(const aPath: string);
     destructor Destroy; override;
-    { Open read-only with FULL sharing (fmShareDenyNone). Log files are usually
-      held open by a writer; on Windows, Reset()/fmShareDenyWrite is refused with
-      "Access denied" when the writer still has the file open. Returns False and
-      leaves Opened=False on failure so the reader can retry next poll instead of
-      dying on an uncaught exception. }
+    { Open read-only. On Windows we MUST add FILE_SHARE_DELETE explicitly:
+      FPC's fmShareDenyNone maps to READ|WRITE only (no DELETE), so logrotate /
+      copytruncate's rename or delete would fail with "file is open in
+      logshipper.exe". Returns False and leaves Opened=False on failure so the
+      reader can retry next poll instead of dying on an uncaught exception. }
     function OpenAt(o: Int64): Boolean;
     procedure Release;
     procedure SeekTo(o: Int64);
@@ -73,6 +73,36 @@ procedure FreeBuffer(b: TList);
 
 implementation
 
+{$IFDEF WINDOWS}
+type
+  { THandleStream does not own/close the handle passed to its constructor. This
+    wrapper opens the file with FILE_SHARE_DELETE (so third-party log rotation
+    can rename/delete it while we read) and closes the handle on Free. }
+  TSharedReadStream = class(THandleStream)
+  public
+    constructor Create(const aPath: string);
+    destructor Destroy; override;
+  end;
+
+constructor TSharedReadStream.Create(const aPath: string);
+var
+  h: THandle;
+begin
+  h := CreateFile(PChar(aPath), GENERIC_READ,
+    FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE,
+    nil, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+  if h = INVALID_HANDLE_VALUE then
+    raise Exception.Create('CreateFile failed: ' + IntToStr(GetLastOSError));
+  inherited Create(h);
+end;
+
+destructor TSharedReadStream.Destroy;
+begin
+  FileClose(Handle);
+  inherited Destroy;
+end;
+{$ENDIF}
+
 procedure FreeBuffer(b: TList);
 var
   i: Integer;
@@ -106,9 +136,13 @@ begin
   Result := False;
   Release;
   try
-    { fmShareDenyNone is essential on Windows: the writer holds the log open,
-      and any deny-write/exclusive share mode fails with "Access denied". }
+    {$IFDEF WINDOWS}
+    { FILE_SHARE_DELETE is essential: FPC's fmShareDenyNone omits it, so without
+      this the log file cannot be renamed/deleted by logrotate while we tail it. }
+    f := TSharedReadStream.Create(Path);
+    {$ELSE}
     f := TFileStream.Create(Path, fmOpenRead or fmShareDenyNone);
+    {$ENDIF}
     if o > f.Size then o := f.Size;
     if o < 0 then o := 0;
     f.Position := o;
