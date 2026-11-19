@@ -25,6 +25,7 @@ type
     FLokiURL: string;
     FListen: string;
     FIndexBytes: TBytes;
+    FIndexSource: string;  { path the page was loaded from; '' = embedded fallback }
     procedure HandleRequest(Sender: TObject;
       var ARequest: TFPHTTPConnectionRequest;
       var AResponse: TFPHTTPConnectionResponse);
@@ -178,22 +179,49 @@ end;
 
 function TLokiViewer.LoadIndexFile: TBytes;
 var
-  fn: string;
+  cands: array of string;
+  fn, exedir: string;
   fs: TFileStream;
+  i: Integer;
 begin
   SetLength(Result, 0);
-  fn := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'web' +
-        PathDelim + 'index.html';
-  if FileExists(fn) then
+  FIndexSource := '';
+  exedir := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0)));
+  { Look next to the exe first, then in the working directory. People often
+    launch from a different cwd or copy only the exe without the web folder;
+    trying both keeps the full UI working in more deployments. }
+  SetLength(cands, 4);
+  cands[0] := exedir + 'web' + PathDelim + 'index.html';
+  cands[1] := IncludeTrailingPathDelimiter(GetCurrentDir) + 'web' + PathDelim + 'index.html';
+  cands[2] := exedir + 'index.html';
+  cands[3] := IncludeTrailingPathDelimiter(GetCurrentDir) + 'index.html';
+  for i := 0 to High(cands) do
   begin
-    fs := TFileStream.Create(fn, fmOpenRead or fmShareDenyWrite);
+    fn := cands[i];
+    if not FileExists(fn) then Continue;
     try
-      SetLength(Result, fs.Size);
-      if fs.Size > 0 then fs.ReadBuffer(Result[0], fs.Size);
-    finally
-      fs.Free;
+      fs := TFileStream.Create(fn, fmOpenRead or fmShareDenyWrite);
+      try
+        SetLength(Result, fs.Size);
+        if fs.Size > 0 then fs.ReadBuffer(Result[0], fs.Size);
+      finally
+        fs.Free;
+      end;
+    except
+      on E: Exception do
+      begin
+        LogWarn('cannot read viewer page ' + fn + ': ' + E.Message);
+        SetLength(Result, 0);
+        Continue;
+      end;
     end;
+    FIndexSource := fn;
+    LogInfo('http viewer page loaded from ' + fn);
+    Exit;
   end;
+  LogWarn('http viewer page not found (tried exe-dir/web/index.html and cwd/web/index.html); ' +
+          'using built-in minimal page. Copy the "web" folder next to logshipper.exe ' +
+          'to get the full UI.');
 end;
 
 procedure TLokiViewer.SendText(var AResponse: TFPHTTPConnectionResponse;
@@ -251,7 +279,9 @@ begin
 
   if path = '/api/info' then
   begin
-    SendText(AResponse, '{"loki":"' + EscapeJson(BaseOfURL(FLokiURL)) + '"}', 'application/json', 200);
+    SendText(AResponse,
+      '{"loki":"' + EscapeJson(BaseOfURL(FLokiURL)) + '","index":"' +
+      EscapeJson(FIndexSource) + '"}', 'application/json', 200);
     Exit;
   end;
 
